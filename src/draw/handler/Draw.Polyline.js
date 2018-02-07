@@ -69,8 +69,11 @@ L.Draw.Polyline = L.Draw.Feature.extend({
 	// Add listener hooks to this handler
 	addHooks: function () {
 		L.Draw.Feature.prototype.addHooks.call(this);
-		if (this._map) {
+		if (this._map) {			
 			this._markers = [];
+
+			this._cacheIndex = 0;
+			this._cacheMarkers = []; //缓存绘制的点，用于撤销恢复
 
 			this._markerGroup = new L.LayerGroup();
 			this._map.addLayer(this._markerGroup);
@@ -108,8 +111,8 @@ L.Draw.Polyline = L.Draw.Feature.extend({
 				.on('mousemove', this._onMouseMove, this)
 				.on('zoomlevelschange', this._onZoomEnd, this)
 				.on('touchstart', this._onTouch, this)
-				.on('zoomend', this._onZoomEnd, this);
-
+				.on('zoomend', this._onZoomEnd, this)
+				.on('keypress', this._onKeyPress, this);
 		}
 	},
 
@@ -126,6 +129,8 @@ L.Draw.Polyline = L.Draw.Feature.extend({
 		this._map.removeLayer(this._markerGroup);
 		delete this._markerGroup;
 		delete this._markers;
+		this._markers = [];
+		this._cacheMarkers = [];
 
 		this._map.removeLayer(this._poly);
 		delete this._poly;
@@ -147,7 +152,8 @@ L.Draw.Polyline = L.Draw.Feature.extend({
 			.off('zoomlevelschange', this._onZoomEnd, this)
 			.off('zoomend', this._onZoomEnd, this)
 			.off('touchstart', this._onTouch, this)
-			.off('click', this._onTouch, this);
+			.off('click', this._onTouch, this)
+			.off('keypress', this._onKeyPress, this);
 	},
 
 	// @method deleteLastVertex(): void
@@ -175,7 +181,7 @@ L.Draw.Polyline = L.Draw.Feature.extend({
 
 	// @method addVertex(): void
 	// Add a vertex to the end of the polyline
-	addVertex: function (latlng) {
+	addVertex: function (latlng, cache) {
 		var markersLength = this._markers.length;
 		// markersLength must be greater than or equal to 2 before intersections can occur
 		if (markersLength >= 2 && !this.options.allowIntersection && this._poly.newLatLngIntersects(latlng)) {
@@ -301,11 +307,23 @@ L.Draw.Polyline = L.Draw.Feature.extend({
 			var lastPtDistance = this._calculateFinishDistance(e.latlng);
 			if (this.options.maxPoints > 1 && this.options.maxPoints == this._markers.length + 1) {
 				this.addVertex(e.latlng);
+
+				for(var k=0,len=this._markers.length; k<len; k++) {
+					this._cacheMarkers.push(this._markers[k].getLatLng());
+				}
+				this._cacheIndex = this._cacheMarkers.length-1;
+
 				this._finishShape();
 			} else if (lastPtDistance < 10 && L.Browser.touch) {
 				this._finishShape();
 			} else if (Math.abs(dragCheckDistance) < 9 * (window.devicePixelRatio || 1)) {
 				this.addVertex(e.latlng);
+
+				for(var k=0,len=this._markers.length; k<len; k++) {
+					this._cacheMarkers.push(this._markers[k].getLatLng());
+				}
+
+				this._cacheIndex = this._cacheMarkers.length-1;
 			}
 			this._enableNewMarkers(); // after a short pause, enable new markers
 		}
@@ -588,5 +606,41 @@ L.Draw.Polyline = L.Draw.Feature.extend({
 	_fireCreatedEvent: function () {
 		var poly = new this.Poly(this._poly.getLatLngs(), this.options.shapeOptions);
 		L.Draw.Feature.prototype._fireCreatedEvent.call(this, poly);
+	},
+
+	//键盘z、y撤销恢复
+	_onKeyPress: function(e) {
+		var eCode = e.originalEvent.charCode;
+		if(eCode == 122) {
+			//按住z键撤销
+			this._undo();
+		}
+		else if(eCode == 121) {
+			//按住y键恢复
+			this._redo();
+		}
+	},
+
+	//撤销
+	_undo: function() {
+		if (this._markers.length <= 1) {
+			return;
+		}
+		this.deleteLastVertex();
+		this._cacheIndex--;
+	},
+
+	//恢复
+	_redo: function() {
+		this._cacheIndex++;
+		if(this._cacheIndex >= this._cacheMarkers.length ) {
+			return;
+		}
+		var lnglat = this._cacheMarkers[this._cacheIndex];
+		this.addVertex(lnglat, false);
 	}
 });
+
+
+
+

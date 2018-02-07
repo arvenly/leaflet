@@ -26,6 +26,7 @@ var deps = {
 		src: [
 			'edit/handler/Edit.Marker.js',
 			'edit/handler/Edit.Poly.js',
+			'edit/handler/Edit.Polyline.js',
 			'edit/handler/Edit.SimpleShape.js',
 			'edit/handler/Edit.Rectangle.js',
       'edit/handler/Edit.CircleMarker.js',
