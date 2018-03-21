@@ -10,7 +10,7 @@ L.Edit.PolyVerticesEdit = L.Handler.extend({
 			className: 'leaflet-div-icon leaflet-editing-icon'
 		}),
 		touchIcon: new L.DivIcon({
-			iconSize: new L.Point(20, 20),
+			iconSize: new L.Point(10, 10),
 			className: 'leaflet-div-icon leaflet-editing-icon leaflet-touch-icon'
 		}),
 		drawError: {

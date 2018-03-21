@@ -22,7 +22,7 @@ L.Draw.Polyline = L.Draw.Feature.extend({
 			className: 'leaflet-div-icon leaflet-editing-icon'
 		}),
 		touchIcon: new L.DivIcon({
-			iconSize: new L.Point(20, 20),
+			iconSize: new L.Point(10, 10),
 			className: 'leaflet-div-icon leaflet-editing-icon leaflet-touch-icon'
 		}),
 		guidelineDistance: 20,
@@ -35,10 +35,10 @@ L.Draw.Polyline = L.Draw.Feature.extend({
 			fill: false,
 			clickable: true
 		},
-		metric: true, // Whether to use the metric measurement system or imperial
-		feet: true, // When not metric, to use feet instead of yards for display.
+		metric: false, // Whether to use the metric measurement system or imperial
+		feet: false, // When not metric, to use feet instead of yards for display.
 		nautic: false, // When not metric, not feet use nautic mile for display
-		showLength: true, // Whether to display distance in the tooltip
+		showLength: false, // Whether to display distance in the tooltip
 		zIndexOffset: 2000, // This should be > than the highest z-index any map layers
 		factor: 1, // To change distance calculation
 		maxPoints: 0 // Once this number of points are placed, finish shape

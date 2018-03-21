@@ -11,7 +11,8 @@ L.Draw.Marker = L.Draw.Feature.extend({
 	options: {
 		icon: new L.Icon.Default(),
 		repeatMode: false,
-		zIndexOffset: 2000 // This should be > than the highest z-index any markers
+		zIndexOffset: 2000, // This should be > than the highest z-index any markers
+		tooltip: "click map to draw a marker"
 	},
 
 	// @method initialize(): void
@@ -19,7 +20,7 @@ L.Draw.Marker = L.Draw.Feature.extend({
 		// Save the type so super can fire, need to do this as cannot do this.TYPE :(
 		this.type = L.Draw.Marker.TYPE;
 
-		this._initialLabelText = L.drawLocal.draw.handlers.marker.tooltip.start;
+		this._initialLabelText = options.tooltip || "点击地图绘制点";
 
 		L.Draw.Feature.prototype.initialize.call(this, map, options);
 	},
@@ -30,7 +31,7 @@ L.Draw.Marker = L.Draw.Feature.extend({
 		L.Draw.Feature.prototype.addHooks.call(this);
 
 		if (this._map) {
-			this._tooltip.updateContent({text: this._initialLabelText});
+			this._tooltip.updateContent({text: this.options.tooltip || ""});
 
 			// Same mouseMarker as in Draw.Polyline
 			if (!this._mouseMarker) {
