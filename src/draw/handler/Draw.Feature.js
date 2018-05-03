@@ -5,7 +5,6 @@ L.Draw = L.Draw || {};
  * @aka Draw.Feature
  */
 L.Draw.Feature = L.Handler.extend({
-
 	// @method initialize(): void
 	initialize: function (map, options) {
 		this._map = map;
@@ -37,9 +36,9 @@ L.Draw.Feature = L.Handler.extend({
 
 		L.Handler.prototype.enable.call(this);
 
-		this.fire('enabled', {handler: this.type});
+		this.fire('enabled', { handler: this.type });
 
-		this._map.fire(L.Draw.Event.DRAWSTART, {layerType: this.type});
+		this._map.fire(L.Draw.Event.DRAWSTART, { layerType: this.type });
 	},
 
 	// @method disable(): void
@@ -50,9 +49,9 @@ L.Draw.Feature = L.Handler.extend({
 
 		L.Handler.prototype.disable.call(this);
 
-		this._map.fire(L.Draw.Event.DRAWSTOP, {layerType: this.type});
+		this._map.fire(L.Draw.Event.DRAWSTOP, { layerType: this.type });
 
-		this.fire('disabled', {handler: this.type});
+		this.fire('disabled', { handler: this.type });
 	},
 
 	// @method addHooks(): void
@@ -91,16 +90,20 @@ L.Draw.Feature = L.Handler.extend({
 	},
 
 	_fireCreatedEvent: function (layer) {
-		this._map.fire(L.Draw.Event.CREATED, {layer: layer, layerType: this.type});
+		this._map.fire(L.Draw.Event.CREATED, { layer: layer, layerType: this.type });
 	},
 
 	// Cancel drawing when the escape key is pressed
 	_cancelDrawing: function (e) {
 		if (e.keyCode === 27) {
-			this._map.fire('draw:canceled', {layerType: this.type});
+			this._map.fire('draw:canceled', { layerType: this.type });
 			this.disable();
 		}
-	}
+	},
+
+
+
+	
 });
 
 

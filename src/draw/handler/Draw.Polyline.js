@@ -41,7 +41,9 @@ L.Draw.Polyline = L.Draw.Feature.extend({
 		showLength: false, // Whether to display distance in the tooltip
 		zIndexOffset: 2000, // This should be > than the highest z-index any map layers
 		factor: 1, // To change distance calculation
-		maxPoints: 0 // Once this number of points are placed, finish shape
+		maxPoints: 0, // Once this number of points are placed, finish shape
+		snappable: false,
+		snapDistance: 20,
 	},
 
 	// @method initialize(): void
@@ -63,13 +65,14 @@ L.Draw.Polyline = L.Draw.Feature.extend({
 		this.type = L.Draw.Polyline.TYPE;
 
 		L.Draw.Feature.prototype.initialize.call(this, map, options);
+
 	},
 
 	// @method addHooks(): void
 	// Add listener hooks to this handler
 	addHooks: function () {
 		L.Draw.Feature.prototype.addHooks.call(this);
-		if (this._map) {			
+		if (this._map) {
 			this._markers = [];
 
 			this._cacheIndex = 0;
@@ -98,12 +101,14 @@ L.Draw.Polyline = L.Draw.Feature.extend({
 					zIndexOffset: this.options.zIndexOffset
 				});
 			}
+			this._hintline = L.polyline([]).addTo(this._map);;
 
 			this._mouseMarker
 				.on('mouseout', this._onMouseOut, this)
 				.on('mousemove', this._onMouseMove, this) // Necessary to prevent 0.8 stutter
 				.on('mousedown', this._onMouseDown, this)
 				.on('mouseup', this._onMouseUp, this) // Necessary for 0.8 compatibility
+				.on("move", this._syncHintLine, this)
 				.addTo(this._map);
 
 			this._map
@@ -181,7 +186,11 @@ L.Draw.Polyline = L.Draw.Feature.extend({
 
 	// @method addVertex(): void
 	// Add a vertex to the end of the polyline
-	addVertex: function (latlng, cache) {
+	addVertex: function (position, cache) {
+		if (!this._mouseMarker._snapped) {
+			this._mouseMarker.setLatLng(position);
+		}
+		var latlng = this._mouseMarker.getLatLng();
 		var markersLength = this._markers.length;
 		// markersLength must be greater than or equal to 2 before intersections can occur
 		if (markersLength >= 2 && !this.options.allowIntersection && this._poly.newLatLngIntersects(latlng)) {
@@ -247,9 +256,29 @@ L.Draw.Polyline = L.Draw.Feature.extend({
 	},
 
 	_onMouseMove: function (e) {
-		var newPos = this._map.mouseEventToLayerPoint(e.originalEvent);
-		var latlng = this._map.layerPointToLatLng(newPos);
+		var newPos;
+		var latlng;
 
+		if (this.options.snappable ) {
+			this._syncHintMarker(e);
+					
+			if(this._mouseMarker._snapped) {
+				latlng = this._mouseMarker.getLatLng();
+				newPos = this._map.latLngToLayerPoint(latlng);
+			}
+			else {
+				newPos = this._map.mouseEventToLayerPoint(e.originalEvent);
+				latlng = this._map.layerPointToLatLng(newPos);
+				// Update the mouse marker position
+				this._mouseMarker.setLatLng(latlng);
+			}
+		}
+		else {
+			newPos = this._map.mouseEventToLayerPoint(e.originalEvent);
+			latlng = this._map.layerPointToLatLng(newPos);
+			// Update the mouse marker position
+			this._mouseMarker.setLatLng(latlng);
+		}
 		// Save latlng
 		// should this be moved to _updateGuide() ?
 		this._currentLatLng = latlng;
@@ -259,14 +288,65 @@ L.Draw.Polyline = L.Draw.Feature.extend({
 		// Update the guide line
 		this._updateGuide(newPos);
 
-		// Update the mouse marker position
-		this._mouseMarker.setLatLng(latlng);
-
 		L.DomEvent.preventDefault(e.originalEvent);
+	},
+	_syncHintLine: function () {
+		var polyPoints = this._hintline.getLatLngs();
+
+		if (polyPoints.length > 0) {
+			var lastPolygonPoint = polyPoints[polyPoints.length - 1];
+
+			// set coords for hintline from marker to last vertex of drawin polyline
+			this._hintline.setLatLngs([lastPolygonPoint, this._mouseMarker.getLatLng()]);
+		}
+	},
+
+	//捕捉
+	_syncHintMarker: function (e) {
+		// move the cursor marker
+		// this._hintMarker.setLatLng(e.latlng);
+
+		// if snapping is enabled, do it
+		this._mouseMarker._snapped = false;
+		var fakeDragEvent = e;
+		fakeDragEvent.target = this._mouseMarker;
+		this._handleSnapping(fakeDragEvent);
+
+		// if self-intersection is forbidden, handle it
+		if (!this.options.allowSelfIntersection) {
+			this._handleSelfIntersection();
+		}
+	},
+
+	_handleSelfIntersection: function () {
+		// ok we need to check the self intersection here
+		// problem: during draw, the marker on the cursor is not yet part
+		// of the layer. So we need to clone the layer, add the
+		// potential new vertex (cursor markers latlngs) and check the self
+		// intersection on the clone. Phew... - let's do it 💪
+
+		// clone layer (polyline is enough, even when it's a polygon)
+		var clone = L.polyline(this._poly.getLatLngs());
+
+		// add the vertex
+		clone.addLatLng(this._mouseMarker.getLatLng());
+
+		// check the self intersection
+		// const selfIntersection = kinks(clone.toGeoJSON());
+		// this._doesSelfIntersect = selfIntersection.features.length > 0;
+
+		// change the style based on self intersection
+		/* if (this._doesSelfIntersect) {
+				this._hintline.setStyle({
+						color: 'red',
+				});
+		} else {
+				this._hintline.setStyle(this.options.hintlineStyle);
+		} */
 	},
 
 	_vertexChanged: function (latlng, added) {
-		this._map.fire(L.Draw.Event.DRAWVERTEX, {layers: this._markerGroup});
+		this._map.fire(L.Draw.Event.DRAWVERTEX, { layers: this._markerGroup });
 		this._updateFinishHandler();
 
 		this._updateRunningMeasure(latlng, added);
@@ -308,10 +388,10 @@ L.Draw.Polyline = L.Draw.Feature.extend({
 			if (this.options.maxPoints > 1 && this.options.maxPoints == this._markers.length + 1) {
 				this.addVertex(e.latlng);
 
-				for(var k=0,len=this._markers.length; k<len; k++) {
+				for (var k = 0, len = this._markers.length; k < len; k++) {
 					this._cacheMarkers.push(this._markers[k].getLatLng());
 				}
-				this._cacheIndex = this._cacheMarkers.length-1;
+				this._cacheIndex = this._cacheMarkers.length - 1;
 
 				this._finishShape();
 			} else if (lastPtDistance < 10 && L.Browser.touch) {
@@ -319,11 +399,11 @@ L.Draw.Polyline = L.Draw.Feature.extend({
 			} else if (Math.abs(dragCheckDistance) < 9 * (window.devicePixelRatio || 1)) {
 				this.addVertex(e.latlng);
 
-				for(var k=0,len=this._markers.length; k<len; k++) {
+				for (var k = 0, len = this._markers.length; k < len; k++) {
 					this._cacheMarkers.push(this._markers[k].getLatLng());
 				}
 
-				this._cacheIndex = this._cacheMarkers.length-1;
+				this._cacheIndex = this._cacheMarkers.length - 1;
 			}
 			this._enableNewMarkers(); // after a short pause, enable new markers
 		}
@@ -551,11 +631,11 @@ L.Draw.Polyline = L.Draw.Feature.extend({
 		// Update tooltip
 		this._tooltip
 			.showAsError()
-			.updateContent({text: this.options.drawError.message});
+			.updateContent({ text: this.options.drawError.message });
 
 		// Update shape
 		this._updateGuideColor(this.options.drawError.color);
-		this._poly.setStyle({color: this.options.drawError.color});
+		this._poly.setStyle({ color: this.options.drawError.color });
 
 		// Hide the error after 2 seconds
 		this._clearHideErrorTimeout();
@@ -574,7 +654,7 @@ L.Draw.Polyline = L.Draw.Feature.extend({
 
 		// Revert shape
 		this._updateGuideColor(this.options.shapeOptions.color);
-		this._poly.setStyle({color: this.options.shapeOptions.color});
+		this._poly.setStyle({ color: this.options.shapeOptions.color });
 	},
 
 	_clearHideErrorTimeout: function () {
@@ -609,20 +689,20 @@ L.Draw.Polyline = L.Draw.Feature.extend({
 	},
 
 	//键盘z、y撤销恢复
-	_onKeyPress: function(e) {
+	_onKeyPress: function (e) {
 		var eCode = e.originalEvent.charCode;
-		if(eCode == 122) {
+		if (eCode == 122) {
 			//按住z键撤销
 			this._undo();
 		}
-		else if(eCode == 121) {
+		else if (eCode == 121) {
 			//按住y键恢复
 			this._redo();
 		}
 	},
 
 	//撤销
-	_undo: function() {
+	_undo: function () {
 		if (this._markers.length <= 1) {
 			return;
 		}
@@ -631,14 +711,382 @@ L.Draw.Polyline = L.Draw.Feature.extend({
 	},
 
 	//恢复
-	_redo: function() {
+	_redo: function () {
 		this._cacheIndex++;
-		if(this._cacheIndex >= this._cacheMarkers.length ) {
+		if (this._cacheIndex >= this._cacheMarkers.length) {
 			return;
 		}
 		var lnglat = this._cacheMarkers[this._cacheIndex];
 		this.addVertex(lnglat, false);
-	}
+	},
+
+
+	_initSnappableMarkers: function () {
+		this.options.snapDistance = this.options.snapDistance || 30;
+
+		if (this.isPolygon()) {
+			// coords is a multidimansional array, handle all rings
+			this._markers.map(this._assignEvents, this);
+		} else {
+			// coords is one dimensional, handle the ring
+			this._assignEvents(this._markers);
+		}
+
+		this._layer.off('pm:dragstart', this._unsnap, this);
+		this._layer.on('pm:dragstart', this._unsnap, this);
+	},
+	_assignEvents: function (markerArr) {
+		// loop through marker array and assign events to the markers
+		/* markerArr.forEach(function(marker) {
+			marker.off('drag', this._handleSnapping, this);
+			marker.on('drag', this._handleSnapping, this);
+
+			marker.off('dragend', this._cleanupSnapping, this);
+			marker.on('dragend', this._cleanupSnapping, this);
+		}); */
+	},
+	_unsnap: function () {
+		// delete the last snap
+		delete this._snapLatLng;
+	},
+	_cleanupSnapping: function () {
+		// delete it, we need to refresh this with each start of a drag because
+		// meanwhile, new layers could've been added to the map
+		delete this._snapList;
+
+		// remove map event
+		this._map.off('pm:remove', this._handleSnapLayerRemoval, this);
+
+		if (this.debugIndicatorLines) {
+			/* this.debugIndicatorLines.forEach(function(line) {
+				line.remove();
+			}); */
+		}
+	},
+	_handleSnapLayerRemoval: function (evt) {
+		// find the layers index in snaplist
+		var index = this._snapList.findIndex(function (e) { e._leaflet_id === evt.layer._leaflet_id });
+		// remove it from the snaplist
+		this._snapList.splice(index, 1);
+	},
+	_handleSnapping: function (e) {
+		var marker = e.target;
+		marker._snapped = false;
+		// if snapping is disabled via holding ALT during drag, stop right here
+		if (e.originalEvent.altKey) {
+			return false;
+		}
+
+		// create a list of polygons that the marker could snap to
+		// this isn't inside a movestart/dragstart callback because middlemarkers are initialized
+		// after dragstart/movestart so it wouldn't fire for them
+		/* if (this._snapList === undefined) {
+			this._createSnapList(e);
+		} */
+
+		this._snapList = this.options.snapFeatureGroup.getLayers();
+		// if there are no layers to snap to, stop here
+
+		if (this._snapList.length <= 0) {
+			return false;
+		}
+
+
+		// get the closest layer, it's closest latlng, segment and the distance
+		// var closestLayer = this._calcClosestLayer(marker.getLatLng(), this._snapList);
+
+		// var closestLayer = this._calcClosestLayer(marker.getLatLng(), this._snapList);
+		var closestLayer = this._calcClosestLayer(e.latlng, this._snapList);
+		
+
+		var isMarker = closestLayer.layer instanceof L.Marker || closestLayer.layer instanceof L.CircleMarker;
+
+		// find the final latlng that we want to snap to
+		var snapLatLng;
+		if (!isMarker) {
+			snapLatLng = this._checkPrioritiySnapping(closestLayer);
+		} else {
+			snapLatLng = closestLayer.latlng;
+		}
+
+		// minimal distance before marker snaps (in pixels)
+		var minDistance = this.options.snapDistance;
+
+		// event info for pm:snap and pm:unsnap
+		var eventInfo = {
+			marker: marker,
+			snapLatLng: snapLatLng,
+			segment: closestLayer.segment,
+			layer: this._layer,
+			layerInteractedWith: closestLayer.layer, // for lack of a better property name
+		};
+
+		if (closestLayer.distance < minDistance) {
+			// snap the marker
+			marker.setLatLng(snapLatLng);
+
+			marker._snapped = true;
+
+			var triggerSnap = function () {
+				this._snapLatLng = snapLatLng;
+				// marker.fire('pm:snap', eventInfo);
+				// this._layer.fire('pm:snap', eventInfo);
+			};
+
+			// check if the snapping position differs from the last snap
+			// Thanks Max & car2go Team
+			var a = this._snapLatLng || {};
+			var b = snapLatLng || {};
+
+			if (a.lat !== b.lat || a.lng !== b.lng) {
+				triggerSnap();
+			}
+		} else if (this._snapLatLng) {
+			marker._snapped = false;
+			// no more snapping
+
+			// if it was previously snapped...
+			// ...unsnap
+			this._unsnap(eventInfo);
+
+
+			// and fire unsnap event
+			// eventInfo.marker.fire('pm:unsnap', eventInfo);
+			// this._layer.fire('pm:unsnap', eventInfo);
+		}
+
+		return true;
+	},
+
+	// we got the point we want to snap to (C), but we need to check if a coord of the polygon
+	// receives priority over C as the snapping point. Let's check this here
+	_checkPrioritiySnapping: function (closestLayer) {
+		var map = this._map;
+
+		// A and B are the points of the closest segment to P (the marker position we want to snap)
+		var A = closestLayer.segment[0];
+		var B = closestLayer.segment[1];
+
+		// C is the point we would snap to on the segment.
+		// The closest point on the closest segment of the closest polygon to P. That's right.
+		var C = closestLayer.latlng;
+
+		// distances from A to C and B to C to check which one is closer to C
+		var distanceAC = this._getDistance(map, A, C);
+		var distanceBC = this._getDistance(map, B, C);
+
+		// closest latlng of A and B to C
+		var closestVertexLatLng = distanceAC < distanceBC ? A : B;
+
+		// distance between closestVertexLatLng and C
+		var shortestDistance = distanceAC < distanceBC ? distanceAC : distanceBC;
+
+		// the distance that needs to be undercut to trigger priority
+		var priorityDistance = this.options.snapDistance;
+
+		// the latlng we ultemately want to snap to
+		var snapLatlng;
+
+		// if C is closer to the closestVertexLatLng (A or B) than the snapDistance,
+		// the closestVertexLatLng has priority over C as the snapping point.
+		if (shortestDistance < priorityDistance) {
+			snapLatlng = closestVertexLatLng;
+		} else {
+			snapLatlng = C;
+		}
+
+		// return the copy of snapping point
+		return Object.assign({}, snapLatlng);
+	},
+
+	_createSnapList: function () {
+		var layers = [];
+		var debugIndicatorLines = [];
+		var map = this._map;
+
+		// find all layers that are or inherit from Polylines... and markers that are not
+		// temporary markers of polygon-edits
+		map.eachLayer(function (layer) {
+			if (layer instanceof L.Polyline || layer instanceof L.Marker || layer instanceof L.CircleMarker) {
+				layers.push(layer);
+
+				map.off('pm:remove', this._handleSnapLayerRemoval, this);
+				map.on('pm:remove', this._handleSnapLayerRemoval, this);
+
+				// this is for debugging
+				var debugLine = L.polyline([], { color: 'red', pmIgnore: true });
+				debugIndicatorLines.push(debugLine);
+
+				// uncomment 👇 this line to show helper lines for debugging
+				// debugLine.addTo(map);
+			}
+		});
+
+		// ...except myself
+		layers = layers.filter(function (layer) { this._layer !== layer });
+
+		// also remove everything that has no coordinates yet
+		layers = layers.filter(function (layer) { layer._latlng || (layer._latlngs && layer._latlngs.length > 0) });
+
+		// finally remove everything that's leaflet.pm specific temporary stuff
+		layers = layers.filter(function (layer) { !layer._pmTempLayer });
+
+		// save snaplist from layers and the other snap layers added from other classes/scripts
+		if (this._otherSnapLayers) {
+			this._snapList = layers.concat(this._otherSnapLayers);
+		} else {
+			this._snapList = layers;
+		}
+
+		this.debugIndicatorLines = debugIndicatorLines;
+	},
+	_calcClosestLayer: function (latlng, layers) {
+		// the closest polygon to our dragged marker latlng
+		var closestLayer = {};
+
+		// loop through the layers
+		for (var i = layers.length; i--;) {
+			var layer = layers[i];
+			var results = this._calcLayerDistances(latlng, layer);
+
+			// show indicator lines, it's for debugging
+			// this.debugIndicatorLines[i].setLatLngs([latlng, results.latlng]);
+
+			// save the info if it doesn't exist or if the distance is smaller than the previous one
+			if (closestLayer.distance === undefined || results.distance < closestLayer.distance) {
+				closestLayer = results;
+				closestLayer.layer = layer;
+			}
+		}
+		// return the closest layer and it's data
+		// if there is no closest layer, return undefined
+		return closestLayer;
+	},
+
+	_calcLayerDistances: function (latlng, layer) {
+		var map = this._map;
+
+		// is this a polyline, marker or polygon?
+		var isPolygon = layer instanceof L.Polygon;
+		var isPolyline = !(layer instanceof L.Polygon) && layer instanceof L.Polyline;
+		var isMarker = layer instanceof L.Marker || layer instanceof L.CircleMarker;
+
+		// the point P which we want to snap (probpably the marker that is dragged)
+		var P = latlng;
+
+		var coords;
+
+		// the coords of the layer
+		if (isPolygon) {
+			// polygon
+			coords = layer.getLatLngs()[0];
+		} else if (isPolyline) {
+			// polyline
+			coords = layer.getLatLngs();
+		} else if (isMarker) {
+			// marker
+			coords = layer.getLatLng();
+
+			// return the info for the marker, no more calculations needed
+			return {
+				latlng: Object.assign({}, coords),
+				distance: this._getDistance(map, coords, P),
+			};
+		}
+
+		// the closest segment (line between two points) of the layer
+		var closestSegment;
+
+		// the shortest distance from P to closestSegment
+		var shortestDistance;
+
+		// loop through the coords of the layer
+
+		for (var index = 0, len = coords.length; index < len; index++) {
+			var coord = coords[index];
+			// take this coord (A)...
+			var A = coord;
+			var nextIndex;
+
+			// and the next coord (B) as points
+			if (isPolygon) {
+				nextIndex = index + 1 === coords.length ? 0 : index + 1;
+			} else {
+				nextIndex = index + 1 === coords.length ? undefined : index + 1;
+			}
+
+			var B = coords[nextIndex];
+
+			if (B) {
+				// calc the distance between P and AB-segment
+				var distance = this._getDistanceToSegment(map, P, A, B);
+
+				// is the distance shorter than the previous one? Save it and the segment
+				if (shortestDistance === undefined || distance < shortestDistance) {
+					shortestDistance = distance;
+					closestSegment = [A, B];
+				}
+			}
+		}
+		/* coords.forEach(function(coord, index) {
+			// take this coord (A)...
+			var A = coord;
+			var nextIndex;
+
+			// and the next coord (B) as points
+			if (isPolygon) {
+				nextIndex = index + 1 === coords.length ? 0 : index + 1;
+			} else {
+				nextIndex = index + 1 === coords.length ? undefined : index + 1;
+			}
+
+			var B = coords[nextIndex];
+
+			if (B) {
+				// calc the distance between P and AB-segment
+				var distance = this._getDistanceToSegment(map, P, A, B);
+
+				// is the distance shorter than the previous one? Save it and the segment
+				if (shortestDistance === undefined || distance < shortestDistance) {
+					shortestDistance = distance;
+					closestSegment = [A, B];
+				}
+			}
+
+			return true;
+		}); */
+
+		// now, take the closest segment (closestSegment) and calc the closest point to P on it.
+		var C = this._getClosestPointOnSegment(map, latlng, closestSegment[0], closestSegment[1]);
+
+		// return the latlng of that sucker
+		return {
+			latlng: Object.assign({}, C),
+			segment: closestSegment,
+			distance: shortestDistance,
+		};
+	},
+
+	_getClosestPointOnSegment: function (map, latlng, latlngA, latlngB) {
+		var maxzoom = map.getMaxZoom();
+		if (maxzoom === Infinity) {
+			maxzoom = map.getZoom();
+		}
+		var P = map.project(latlng, maxzoom);
+		var A = map.project(latlngA, maxzoom);
+		var B = map.project(latlngB, maxzoom);
+		var closest = L.LineUtil.closestPointOnSegment(P, A, B);
+		return map.unproject(closest, maxzoom);
+	},
+	_getDistanceToSegment: function (map, latlng, latlngA, latlngB) {
+		var P = map.latLngToLayerPoint(latlng);
+		var A = map.latLngToLayerPoint(latlngA);
+		var B = map.latLngToLayerPoint(latlngB);
+		return L.LineUtil.pointToSegmentDistance(P, A, B);
+	},
+	_getDistance: function (map, latlngA, latlngB) {
+		return map.latLngToLayerPoint(latlngA).distanceTo(map.latLngToLayerPoint(latlngB));
+	},
 });
 
 

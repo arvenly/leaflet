@@ -18,7 +18,9 @@ L.Draw.SimpleShape = L.Draw.Feature.extend({
 
 	// @method addHooks(): void
 	// Add listener hooks to this handler.
-	addHooks: function () {
+	addHooks: function () {		
+		this._initialLabelText = L.drawLocal.draw.handlers.simpleshape.tooltip.start;
+		this._endLabelText = L.drawLocal.draw.handlers.simpleshape.tooltip.end;
 		L.Draw.Feature.prototype.addHooks.call(this);
 		if (this._map) {
 			this._mapDraggable = this._map.dragging.enabled();

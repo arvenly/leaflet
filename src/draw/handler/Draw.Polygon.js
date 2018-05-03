@@ -1,3 +1,4 @@
+
 /**
  * @class L.Draw.Polygon
  * @aka Draw.Polygon
@@ -21,7 +22,9 @@ L.Draw.Polygon = L.Draw.Polyline.extend({
 			fill: true,
 			fillColor: null, //same as color by default
 			fillOpacity: 0.2,
-			clickable: true
+			clickable: true,
+			snappable: false,
+			snapFeatureGroup: null,
 		},
 		// Whether to use the metric measurement system (truthy) or not (falsy).
 		// Also defines the units to use for the metric system as an array of

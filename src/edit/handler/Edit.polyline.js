@@ -17,8 +17,7 @@ L.Edit.PolyVerticesEdit = L.Handler.extend({
 			color: '#b00b00',
 			timeout: 1000
 		}
-
-
+		
 	},
 
 	// @method intialize(): void
@@ -34,6 +33,7 @@ L.Edit.PolyVerticesEdit = L.Handler.extend({
 		}
 
 		this._latlngs = latlngs;
+		this._isFlat = L.LineUtil.isFlat(latlngs);
 
 		this._stackLimit = 100;
 
@@ -43,15 +43,17 @@ L.Edit.PolyVerticesEdit = L.Handler.extend({
 	// Compatibility method to normalize Poly* objects
 	// between 0.7.x and 1.0+
 	_defaultShape: function () {
-		if (!L.Polyline._flat) {
-			return this._latlngs;
-		}
-		return L.Polyline._flat(this._latlngs) ? this._latlngs : this._latlngs[0];
-  },
-  
-  _getShape: function() {
-    return [].concat(JSON.parse(JSON.stringify(this._poly._latlngs[0])) );
-  },
+		return this._latlngs;
+
+		// if (!L.LineUtil.isFlat) {
+		// 	return this._latlngs;
+		// }
+		// return L.LineUtil.isFlat(this._latlngs) ? this._latlngs : this._latlngs[0];
+	},
+
+	_getShape: function () {
+		return [].concat(JSON.parse(JSON.stringify(this._poly._latlngs)));
+	},
 
 	// @method addHooks(): void
 	// Add listener hooks to this handler.
@@ -59,8 +61,8 @@ L.Edit.PolyVerticesEdit = L.Handler.extend({
 		var poly = this._poly;
 		var path = poly._path;
 
-    this._redoStack = [];
-    this._lastGeometry = [].concat(JSON.parse(JSON.stringify(poly._latlngs)));
+		this._redoStack = [];
+		this._lastGeometry = [].concat(JSON.parse(JSON.stringify(poly._latlngs)));
 		this._undoStack = [];
 
 		if (!(poly instanceof L.Polygon)) {
@@ -122,9 +124,9 @@ L.Edit.PolyVerticesEdit = L.Handler.extend({
 		if (poly._map) {
 			poly._map.removeLayer(this._markerGroup);
 			delete this._markerGroup;
-      delete this._markers;
-      
-      this._map.off("keypress", this._onKeyPress, this);
+			delete this._markers;
+
+			this._map.off("keypress", this._onKeyPress, this);
 		}
 	},
 
@@ -139,35 +141,67 @@ L.Edit.PolyVerticesEdit = L.Handler.extend({
 		if (!this._markerGroup) {
 			this._markerGroup = new L.LayerGroup();
 		}
-		this._markers = [];
 
-		var latlngs = _poly && _poly.getLatLngs()[0] || this._defaultShape(),
-		// var latlngs = this._defaultShape(),
+		var latlngs = _poly && _poly.getLatLngs() || this._defaultShape(),
+			// var latlngs = this._defaultShape(),
 			i, j, len, marker;
 
+		this._markers = [];
+
+		if (this._isFlat) {
+			this._renderMarkers(latlngs);
+		}
+		else {
+			for (var k = 0, lenp = latlngs.length; k < lenp; k++) {
+				this._markers.push([]);
+				var points = latlngs[k];
+				this._renderMarkers(points, k);
+			}
+		}
+	},
+
+	_renderMarkers: function (latlngs, nestIndex) {
 		for (i = 0, len = latlngs.length; i < len; i++) {
-			marker = this._createMarker(latlngs[i], i);
+			marker = this._createMarker(latlngs[i], i, nestIndex);
 			// marker.on('click', this._onMarkerClick, this);
 			// marker.on('contextmenu', this._onContextMenu, this);
-			this._markers.push(marker);
+			if (typeof (nestIndex) === "number") {
+				this._markers[nestIndex].push(marker);
+			}
+			else {
+				this._markers.push(marker);
+			}
 		}
 
 		var markerLeft, markerRight;
 
-		for (i = 0, j = len - 1; i < len; j = i++) {
-			if (i === 0 && !(L.Polygon && (this._poly instanceof L.Polygon))) {
-				continue;
+		if (typeof (nestIndex) === "number") {
+			len = this._markers[nestIndex].length;
+			for (i = 0, j = len - 1; i < len; j = i++) {
+				if (i === 0 && !(L.Polygon && (this._poly instanceof L.Polygon))) {
+					continue;
+				}
+				markerLeft = this._markers[nestIndex][j];
+				markerRight = this._markers[nestIndex][i];
+
+				this._createMiddleMarker(markerLeft, markerRight, nestIndex);
+				this._updatePrevNext(markerLeft, markerRight, nestIndex);
 			}
-
-			markerLeft = this._markers[j];
-			markerRight = this._markers[i];
-
-			this._createMiddleMarker(markerLeft, markerRight);
-			this._updatePrevNext(markerLeft, markerRight);
+		}
+		else {
+			for (i = 0, j = len - 1; i < len; j = i++) {
+				if (i === 0 && !(L.Polygon && (this._poly instanceof L.Polygon))) {
+					continue;
+				}
+				markerLeft = this._markers[j];
+				markerRight = this._markers[i];
+				this._createMiddleMarker(markerLeft, markerRight, nestIndex);
+				this._updatePrevNext(markerLeft, markerRight, nestIndex);
+			}
 		}
 	},
 
-	_createMarker: function (latlng, index) {
+	_createMarker: function (latlng, index, nestIndex) {
 		// Extending L.Marker in TouchEvents.js to include touch.
 		var marker = new L.Marker.Touch(latlng, {
 			draggable: true,
@@ -176,6 +210,10 @@ L.Edit.PolyVerticesEdit = L.Handler.extend({
 
 		marker._origLatLng = latlng;
 		marker._index = index;
+
+		if (typeof (nestIndex) === "number") {
+			marker._nestIndex = nestIndex;
+		}
 
 		marker
 			.on('dragstart', this._onMarkerDragStart, this)
@@ -192,13 +230,20 @@ L.Edit.PolyVerticesEdit = L.Handler.extend({
 	},
 
 	_onMarkerDragStart: function () {
-    this._poly.fire('editstart');
-    this._storeUndo([].concat(JSON.parse(JSON.stringify(this._poly._latlngs))));
+		this._poly.fire('editstart');
+		this._storeUndo([].concat(JSON.parse(JSON.stringify(this._poly._latlngs))));
 	},
 
 	_spliceLatLngs: function () {
 		var latlngs = this._getShape();
-		var removed = [].splice.apply(latlngs, arguments);
+		var removed;
+		if (typeof (arguments[3]) == "number") {
+			removed = [].splice.apply(latlngs[arguments[3]], [arguments[0], arguments[1], arguments[2]]);
+		}
+		else {
+			removed = [].splice.apply(latlngs, arguments);
+		}
+
 		this._poly.setLatLngs(latlngs);
 		return removed;
 	},
@@ -222,10 +267,10 @@ L.Edit.PolyVerticesEdit = L.Handler.extend({
 			.off('MSPointerUp', this._fireEdit, this);
 	},
 
-	_fireEdit: function () {  
+	_fireEdit: function () {
 		this._poly.edited = true;
 		this._poly.fire('edit');
-    this._poly._map.fire(L.Draw.Event.EDITVERTEX, { layers: this._markerGroup, poly: this._poly });
+		this._poly._map.fire(L.Draw.Event.EDITVERTEX, { layers: this._markerGroup, poly: this._poly });
 	},
 
 	_onMarkerDrag: function (e) {
@@ -276,16 +321,23 @@ L.Edit.PolyVerticesEdit = L.Handler.extend({
 			}
 		}
 		//refresh the bounds when draging
+		
 		this._poly._bounds._southWest = L.latLng(Infinity, Infinity);
 		this._poly._bounds._northEast = L.latLng(-Infinity, -Infinity);
-		var latlngs = this._poly.getLatLngs();
-    this._poly.setLatLngs(latlngs);
-    
-    this._poly.fire('editdrag');
+		var latlngs = this._getShape();
+		if(typeof(marker._nestIndex) === "number") {
+			latlngs[marker._nestIndex].splice(marker._index, 1, marker._latlng);
+		}
+		else {
+			latlngs.splice(marker._index, 1, marker._latlng);
+		}
+		this._poly.setLatLngs(latlngs);
+
+		this._poly.fire('editdrag');
 	},
 
 	_onMarkerClick: function (e) {
-    return;
+		return;
 		var minPoints = L.Polygon && (this._poly instanceof L.Polygon) ? 4 : 3,
 			marker = e.target;
 
@@ -348,17 +400,24 @@ L.Edit.PolyVerticesEdit = L.Handler.extend({
 		this.updateMarkers();
 	},
 
-	_updateIndexes: function (index, delta) {
+	_updateIndexes: function (index, delta, nestIndex) {
 		this._markerGroup.eachLayer(function (marker) {
-			if (marker._index > index) {
-				marker._index += delta;
+			if (typeof (nestIndex) != "undefined") {
+				if (marker._nestIndex === nestIndex && marker._index > index) {
+					marker._index += delta;
+				}
+			}
+			else {
+				if (marker._index > index) {
+					marker._index += delta;
+				}
 			}
 		});
 	},
 
-	_createMiddleMarker: function (marker1, marker2) {
+	_createMiddleMarker: function (marker1, marker2, nestIndex) {
 		var latlng = this._getMiddleLatLng(marker1, marker2),
-			marker = this._createMarker(latlng),
+			marker = this._createMarker(latlng, undefined, nestIndex),
 			onClick,
 			onDragStart,
 			onDragEnd;
@@ -379,12 +438,19 @@ L.Edit.PolyVerticesEdit = L.Handler.extend({
 
 			latlng.lat = marker.getLatLng().lat;
 			latlng.lng = marker.getLatLng().lng;
-			this._spliceLatLngs(i, 0, latlng);
-			this._markers.splice(i, 0, marker);
+
+			if (typeof (nestIndex) != "undefined") {
+				this._spliceLatLngs(i, 0, latlng, nestIndex);
+				this._markers[nestIndex].splice(i, 0, marker);
+			}
+			else {
+				this._spliceLatLngs(i, 0, latlng);
+				this._markers.splice(i, 0, marker);
+			}
 
 			marker.setOpacity(1);
 
-			this._updateIndexes(i, 1);
+			this._updateIndexes(i, 1, nestIndex);
 			marker2._index++;
 			this._updatePrevNext(marker1, marker);
 			this._updatePrevNext(marker, marker2);
@@ -397,8 +463,8 @@ L.Edit.PolyVerticesEdit = L.Handler.extend({
 			marker.off('dragend', onDragEnd, this);
 			marker.off('touchmove', onDragStart, this);
 
-			this._createMiddleMarker(marker1, marker);
-			this._createMiddleMarker(marker, marker2);
+			this._createMiddleMarker(marker1, marker, nestIndex);
+			this._createMiddleMarker(marker, marker2, nestIndex);
 		};
 
 		onClick = function () {
@@ -434,14 +500,14 @@ L.Edit.PolyVerticesEdit = L.Handler.extend({
 	},
 
 	//键盘z、y撤销恢复
-	_onKeyPress: function(e) {
-    var eCode = e.originalEvent.charCode;
-		if(eCode == 122) {
+	_onKeyPress: function (e) {
+		var eCode = e.originalEvent.charCode;
+		if (eCode == 122) {
 			//按住z键撤销
 			this._undo();
 		}
-		else if(eCode == 121) {
-      //按住y键恢复
+		else if (eCode == 121) {
+			//按住y键恢复
 			this._redo();
 		}
 	},
@@ -453,8 +519,8 @@ L.Edit.PolyVerticesEdit = L.Handler.extend({
 	_storeUndo: function (popLatlngs) {
 		if (this._undoStack.length >= this._stackLimit) {
 			return;
-    }
-		this._undoStack.push( [].concat(JSON.parse(JSON.stringify(popLatlngs))) );
+		}
+		this._undoStack.push([].concat(JSON.parse(JSON.stringify(popLatlngs))));
 	},
 
 	/**
@@ -465,34 +531,35 @@ L.Edit.PolyVerticesEdit = L.Handler.extend({
 		if (this._redoStack.length >= this._stackLimit) {
 			return;
 		}
-		this._redoStack.push([].concat(JSON.parse(JSON.stringify(geometry))) );
-  },
+		this._redoStack.push([].concat(JSON.parse(JSON.stringify(geometry))));
+	},
 
 	//撤销
 	_undo: function () {
-    if(!this._undoStack || this._undoStack.length == 0){
-      return;
-    }
-    this._storeRedo(this._poly.getLatLngs());
+		if (!this._undoStack || this._undoStack.length == 0) {
+			return;
+		}
+		this._storeRedo(this._poly.getLatLngs());
 
-    var popLatlngs = this._undoStack.pop();
-    this._updatePoly(popLatlngs);
+		var popLatlngs = this._undoStack.pop();
+		this._updatePoly(popLatlngs);
 	},
 
 	//恢复
 	_redo: function () {
-    if(!this._redoStack || this._redoStack.length == 0) {
-      return;
-    }
-    
-    this._storeUndo(this._poly.getLatLngs());
+		if (!this._redoStack || this._redoStack.length == 0) {
+			return;
+		}
 
-    var popLatlngs = this._redoStack.pop();
-    this._updatePoly(popLatlngs);
-  },
-  
-  _updatePoly: function(popLatlngs) {
-    this._poly.setLatLngs(popLatlngs);
-    this.updateMarkers(this._poly);
-  }
+		this._storeUndo(this._poly.getLatLngs());
+
+		var popLatlngs = this._redoStack.pop();
+		this._updatePoly(popLatlngs);
+	},
+
+	_updatePoly: function (popLatlngs) {
+		this._poly.setLatLngs(popLatlngs);
+		this.updateMarkers(this._poly);
+	}
+
 });
