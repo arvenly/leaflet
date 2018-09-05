@@ -94,10 +94,10 @@ L.Draw.Polyline = L.Draw.Feature.extend({
 				this._mouseMarker = L.marker(this._map.getCenter(), {
 					icon: L.divIcon({
 						className: 'leaflet-mouse-marker',
-						iconAnchor: [20, 20],
-						iconSize: [40, 40]
+						iconAnchor: [5, 5],
+						iconSize: [10, 10]
 					}),
-					opacity: 0,
+					opacity: 1,
 					zIndexOffset: this.options.zIndexOffset
 				});
 			}
@@ -261,7 +261,7 @@ L.Draw.Polyline = L.Draw.Feature.extend({
 
 		if (this.options.snappable ) {
 			this._syncHintMarker(e);
-					
+			
 			if(this._mouseMarker._snapped) {
 				latlng = this._mouseMarker.getLatLng();
 				newPos = this._map.latLngToLayerPoint(latlng);
